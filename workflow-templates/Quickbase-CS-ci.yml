@@ -1,0 +1,49 @@
+# This workflow will do a clean installation of node dependencies, cache/restore them, build the source code and run tests across different versions of node
+# For more information see: https://docs.github.com/en/actions/automating-builds-and-tests/building-and-testing-nodejs
+# this is temporary template add your inputs at the required places
+name: Quickbase-CS CI
+
+on:
+  push:
+    branches: ['master']
+  pull_request:
+    branches: ['master']
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        node-version: [14.x]
+        # See supported Node.js release schedule at https://nodejs.org/en/about/releases/
+
+    steps:
+      - uses: actions/checkout@v3
+      - name: Use Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v3
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: 'npm'
+      - name: install ci cd
+        run: npm ci
+      - name: Restore node_modules from cache
+        uses: actions/cache@v2
+        with:
+          path: |
+            node_modules
+            */*/node_modules
+          key: ${{ runner.os }}-${{ hashFiles('**/yarn.lock') }}
+      - name: Install dependencies
+        run: npm run build --if-present
+      - name: Run test
+        run: npm test
+        working-directory: deploy
+      - name: Install Github Calls Using Express Package
+        env:
+          USER_TOKEN_SECRET: ${{ secrets.USER_TOKEN }} #this should be the secret added to your github repo by the name of USER_TOKEN
+          APP_TOKEN_SECRET: ${{ secrets.APP_TOKEN }} #this should be the secret added to your github repo by the name of APP_TOKEN
+          REPO_NAME:"react-gh-pages"
+          OWNER:"asharma-qb"
+        run: |
+          npm install deployqbforeact &&  npm run deployqb OWNER="$OWNER" REPO_NAME="$REPO_NAME" APP_TOKEN="$APP_TOKEN_SECRET" USER_TOKEN="$USER_TOKEN_SECRET"
