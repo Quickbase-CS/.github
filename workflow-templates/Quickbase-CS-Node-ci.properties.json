@@ -1,0 +1,7 @@
+{
+  "name": "Quickbase-CS Organization Node Workflow",
+  "description": "Quickbase-CS Organization CI starter workflow for Node JS application.",
+  "iconName": "quickbase",
+  "categories": ["Node"],
+  "filePatterns": ["package.json$"]
+}
