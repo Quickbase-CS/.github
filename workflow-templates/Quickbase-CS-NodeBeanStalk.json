@@ -1,0 +1,7 @@
+{
+  "name": "Quickbase-CS Organization Node Workflow for Beanstalk application",
+  "description": "Quickbase-CS Organization CI starter workflow for Node JS application for Beanstalk.",
+  "iconName": "quickbase",
+  "categories": ["Node"],
+  "filePatterns": ["package.json$"]
+}
