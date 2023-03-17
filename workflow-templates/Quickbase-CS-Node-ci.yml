@@ -36,3 +36,5 @@ jobs:
           aws_region: eu-west-1
           function_name: my-function
           zip_file: bundle.zip
+          memory_size: 512
+          timeout: 30
