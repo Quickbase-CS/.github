@@ -1,15 +1,21 @@
 # This workflow will do a clean installation of node dependencies, cache/restore them, build the source code and run tests across different versions of node
 # For more information see: https://docs.github.com/en/actions/automating-builds-and-tests/building-and-testing-nodejs
 # this is temporary template add your inputs at the required places
-name: Quickbase-CS CI
+name: Quickbase-REACT_CS CI
 
 on:
   push:
-    branches: ['main']
+    branches: ['development', 'main']
   pull_request:
-    branches: ['main']
+    branches: ['development']
 
 jobs:
+  if_merged:
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          echo The PR was merged
   build:
     runs-on: ubuntu-latest
 
@@ -26,7 +32,7 @@ jobs:
           node-version: ${{ matrix.node-version }}
           cache: 'npm'
       - name: install ci cd
-        run: npm ci
+        run: npm i
       - name: Restore node_modules from cache
         uses: actions/cache@v2
         with:
@@ -41,11 +47,11 @@ jobs:
         working-directory: deploy
       - name: Install Github Calls Using Express Package
         env:
-         USER_TOKEN_SECRET: ${{ secrets.USER_TOKEN }} #this should be the secret added to your github repo by the name of USER_TOKEN
-         APP_TOKEN_SECRET: ${{ secrets.APP_TOKEN }} #this should be the secret added to your github repo by the name of APP_TOKEN
-         REPO_NAME: ${{ github.event.repository.name }}
-         OWNER: ${{github.repository_owner}}
-         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-         BRANCH: 'main'
+          USER_TOKEN_SECRET: ${{ secrets.USER_TOKEN }} #this should be the secret added to your github repo by the name of USER_TOKEN
+          APP_TOKEN_SECRET: ${{ secrets.APP_TOKEN }} #this should be the secret added to your github repo by the name of APP_TOKEN
+          REPO_NAME: ${{ github.event.repository.name }}
+          OWNER: ${{github.repository_owner}}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BRANCH: ${{ github.head_ref || github.ref_name }}
         run: |
           npm i -g deployqbforreact &&  deployqbforreact GITHUB_TOKEN="$GITHUB_TOKEN" OWNER="$OWNER" REPO_NAME="$REPO_NAME" APP_TOKEN="$APP_TOKEN_SECRET" USER_TOKEN="$USER_TOKEN_SECRET" BRANCH="$BRANCH"
