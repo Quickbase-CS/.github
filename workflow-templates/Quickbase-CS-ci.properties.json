@@ -1,7 +1,0 @@
-{
-  "name": "Quickbase-CS Organization Workflow",
-  "description": "Quickbase-CS Organization CI starter workflow.",
-  "iconName": "quickbase",
-  "categories": ["JavaScript"],
-  "filePatterns": ["package.json$", "qbcli.json"]
-}
