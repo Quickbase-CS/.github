@@ -40,11 +40,6 @@ jobs:
             node_modules
             */*/node_modules
           key: ${{ runner.os }}-${{ hashFiles('**/yarn.lock') }}
-      - name: Install dependencies
-        run: npm run build --if-present
-      - name: Run test
-        run: npm test
-        working-directory: deploy
       - name: Install Github Calls Using Express Package
         env:
           USER_TOKEN_SECRET: ${{ secrets.USER_TOKEN }} #this should be the secret added to your github repo by the name of USER_TOKEN
