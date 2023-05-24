@@ -1,0 +1,7 @@
+{
+  "name": "Quickbase-CS Organization AWS github connect using openid",
+  "description": "Quickbase-CS Organization AWS github connect using openid connect.",
+  "iconName": "quickbase",
+  "categories": ["Node"],
+  "filePatterns": []
+}
