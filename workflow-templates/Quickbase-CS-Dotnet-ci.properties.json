@@ -1,0 +1,13 @@
+{
+    "name": "Quickbase-CS Dotnet WebApp Organization Workflow",
+    "description": "Deploy Dotnet WebApp to AWS EB using manifest versioning",
+    "iconName": "quickbase",
+    "categories": [
+        "dotnet",
+        "C#"
+    ],
+    "filePatterns": [
+        "appsettings.json$",
+        "Program.cs"
+    ]
+}
