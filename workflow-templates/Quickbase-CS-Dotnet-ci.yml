@@ -1,0 +1,247 @@
+name: Deploy Dotnet WebApp to EB
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  init:
+    runs-on: ubuntu-latest
+    outputs:
+      run_prod: ${{ steps.check.outputs.run_prod || false }}
+      prod_version: ${{ steps.check.outputs.prod_version}}
+      run_dev: ${{ steps.check.outputs.run_dev || false }}
+      dev_version: ${{ steps.check.outputs.dev_version}}
+      run_preprod: ${{ steps.check.outputs.run_preprod || false }}
+      preprod_version: ${{ steps.check.outputs.preprod_version}}
+
+    # Tracks prod.manifest, dev.manifest and preprod.manifest file changes
+    steps:
+      - uses: actions/checkout@v3
+      - uses: dorny/paths-filter@v2
+        id: changes
+        with:
+          filters: |
+            prod:
+                - 'manifests/prod.manifest'
+            dev:
+                - 'manifests/dev.manifest'
+            preprod:
+                - 'manifests/preprod.manifest'
+
+      - name: Check for manifest updates
+        id: check
+        if: steps.changes.outputs.prod == 'true' || steps.changes.outputs.dev == 'true'
+        run: |
+          run_environment () {
+            if [[ ${{ steps.changes.outputs.prod }} == "true" ]]; then
+                echo "run_prod=false" >> "$GITHUB_OUTPUT"
+            fi
+            if [[ ${{ steps.changes.outputs.dev }} == "true" ]]; then
+                echo "run_dev=false" >> "$GITHUB_OUTPUT"
+            fi 
+            if [[ ${{ steps.changes.outputs.preprod }} == "true" ]]; then
+                echo "run_preprod=false" >> "$GITHUB_OUTPUT"
+            fi
+          }      
+
+          # set version to the manifest file version
+          getManifestVersion () {
+            # Specify the file you want to read
+            file_path="$PWD/manifests/$1.manifest"
+
+            # Check if the file exists
+            if [ "$file_path" ]; then
+                # Read the first line of the file and store it in a variable
+                first_line=$(head -n 1 "$file_path")
+                
+                if [ "$first_line" ]; then
+                    echo "$1 version $first_line will get deployed"
+                    if [[ ${{ steps.changes.outputs.prod }} == "true" ]]; then
+                        echo "prod_version=$first_line" >> "$GITHUB_OUTPUT"
+                    fi
+                    if [[ ${{ steps.changes.outputs.dev }} == "true" ]]; then
+                        echo "dev_version=$first_line" >> "$GITHUB_OUTPUT"
+                    fi 
+                    if [[ ${{ steps.changes.outputs.preprod }} == "true" ]]; then
+                        echo "preprod_version=$first_line" >> "$GITHUB_OUTPUT"
+                    fi
+                else                    
+                    echo "Manifest version not found in file $file_path"
+                    run_environment $1
+                fi
+            else
+                echo "Manifest File not found: $file_path"
+                run_environment $1
+            fi
+          }  
+
+          if [[ ${{ steps.changes.outputs.prod }} == "true" ]]; then
+            echo "run_prod=true" >> "$GITHUB_OUTPUT"
+            getManifestVersion prod
+          fi
+
+          if [[ ${{ steps.changes.outputs.dev }} == "true" ]]; then
+            echo "run_dev=true" >> "$GITHUB_OUTPUT"
+            getManifestVersion dev
+          fi
+
+          if [[ ${{ steps.changes.outputs.preprod }} == "true" ]]; then
+            echo "run_preprod=true" >> "$GITHUB_OUTPUT"
+            getManifestVersion preprod
+          fi
+
+  # This workflow will generate the publish files, zip it for AWS beanstalk deployment
+  prod_deploy:
+    needs: init
+    if: needs.init.outputs.run_prod == 'true'
+    runs-on: ubuntu-latest
+    environment: prod
+    # These permissions are needed to interact with GitHub's OIDC Token endpoint.
+    permissions:
+      id-token: write # required to use OIDC authentication for requesting the JWT
+      contents: read # This is required for actions/checkout
+
+    strategy:
+      matrix:
+        dotnet-version: ['7.0.x']
+
+    steps:
+      - name: Git setup
+        uses: actions/checkout@v3
+
+      - name: Dotnet run
+        uses: actions/setup-dotnet@v3
+        with:
+          dotnet-version: ${{ matrix.dotnet-version }} # SDK Version to use; x will use the latest version
+
+      - name: Publish files
+        run: dotnet restore; dotnet publish -r win10-x64 --configuration "Release" --self-contained "true" -o ./site; #replace with "-r linux-x64" for linux
+
+      - name: Generate deployment package
+        run: cd site; zip ../site.zip *; cd ..; zip ${{ github.event.repository.name }}-${{ needs.init.outputs.prod_version }}.zip site.zip aws-windows-deployment-manifest.json
+
+      - name: Configure AWS Credentials
+        id: creds
+        uses: aws-actions/configure-aws-credentials@v3
+        with:
+          role-to-assume: ${{ secrets.PROD_DEPLOY_ROLE }}
+          aws-region: us-west-2
+          output-credentials: true
+
+      - name: Deploy to Prod
+        uses: einaregilsson/beanstalk-deploy@v16
+        with:
+          aws_access_key: ${{ steps.creds.outputs.aws-access-key-id }}
+          aws_secret_key: ${{ steps.creds.outputs.aws-secret-access-key }}
+          aws_session_token: ${{ steps.creds.outputs.aws-session-token }}
+          use_existing_version_if_available: true #will deploy a version already in Elastic Beanstalk if it exists,
+          application_name: ${{ vars.EB_APP_NAME }}
+          environment_name: ${{ vars.EB_ENV_NAME }}
+          version_label: ${{ needs.init.outputs.prod_version }}
+          region: us-west-2
+          deployment_package: ${{ github.event.repository.name }}-${{ needs.init.outputs.prod_version }}.zip
+          version_description: ${{github.SHA}}
+
+  dev_deploy:
+    needs: init
+    if: needs.init.outputs.run_dev == 'true'
+    runs-on: ubuntu-latest
+    environment: dev
+    # These permissions are needed to interact with GitHub's OIDC Token endpoint.
+    permissions:
+      id-token: write # required to use OIDC authentication for requesting the JWT
+      contents: read # This is required for actions/checkout
+
+    strategy:
+      matrix:
+        dotnet-version: ['7.0.x']
+
+    steps:
+      - name: Git setup
+        uses: actions/checkout@v3
+
+      - name: Dotnet run
+        uses: actions/setup-dotnet@v3
+        with:
+          dotnet-version: ${{ matrix.dotnet-version }} # SDK Version to use; x will use the latest version
+
+      - name: Publish files
+        run: dotnet restore; dotnet publish -r win10-x64 --configuration "Release" --self-contained "true" -o ./site; #replace with "-r linux-x64" for linux
+
+      - name: Generate deployment package
+        run: cd site; zip ../site.zip *; cd ..; zip ${{ github.event.repository.name }}-${{ needs.init.outputs.dev_version }}.zip site.zip aws-windows-deployment-manifest.json
+
+      - name: Configure AWS Credentials
+        id: creds
+        uses: aws-actions/configure-aws-credentials@v3
+        with:
+          role-to-assume: ${{ secrets.DEV_DEPLOY_ROLE }}
+          aws-region: us-west-2
+          output-credentials: true
+
+      - name: Deploy to Dev
+        uses: einaregilsson/beanstalk-deploy@v16
+        with:
+          aws_access_key: ${{ steps.creds.outputs.aws-access-key-id }}
+          aws_secret_key: ${{ steps.creds.outputs.aws-secret-access-key }}
+          aws_session_token: ${{ steps.creds.outputs.aws-session-token }}
+          application_name: ${{ vars.EB_APP_NAME }}
+          use_existing_version_if_available: true #will deploy a version already in Elastic Beanstalk if it exists,
+          environment_name: ${{ vars.EB_ENV_NAME }}
+          version_label: ${{ needs.init.outputs.dev_version }}
+          region: us-west-2
+          deployment_package: ${{ github.event.repository.name }}-${{ needs.init.outputs.dev_version }}.zip
+          version_description: ${{github.SHA}}
+
+  preprod_deploy:
+    needs: init
+    if: needs.init.outputs.run_preprod == 'true'
+    runs-on: ubuntu-latest
+    environment: preprod
+    # These permissions are needed to interact with GitHub's OIDC Token endpoint.
+    permissions:
+      id-token: write # required to use OIDC authentication for requesting the JWT
+      contents: read # This is required for actions/checkout
+
+    strategy:
+      matrix:
+        dotnet-version: ['7.0.x']
+
+    steps:
+      - name: Git setup
+        uses: actions/checkout@v3
+
+      - name: Dotnet run
+        uses: actions/setup-dotnet@v3
+        with:
+          dotnet-version: ${{ matrix.dotnet-version }} # SDK Version to use; x will use the latest version
+
+      - name: Publish files
+        run: dotnet restore; dotnet publish -r win10-x64 --configuration "Release" --self-contained "true" -o ./site; #replace with "-r linux-x64" for linux
+
+      - name: Generate deployment package
+        run: cd site; zip ../site.zip *; cd ..; zip ${{ github.event.repository.name }}-${{ needs.init.outputs.preprod_version }}.zip site.zip aws-windows-deployment-manifest.json
+
+      - name: Configure AWS Credentials
+        id: creds
+        uses: aws-actions/configure-aws-credentials@v3
+        with:
+          role-to-assume: ${{ secrets.PREPROD_DEPLOY_ROLE }}
+          aws-region: us-west-2
+          output-credentials: true
+
+      - name: Deploy to preprod
+        uses: einaregilsson/beanstalk-deploy@v16
+        with:
+          aws_access_key: ${{ steps.creds.outputs.aws-access-key-id }}
+          aws_secret_key: ${{ steps.creds.outputs.aws-secret-access-key }}
+          aws_session_token: ${{ steps.creds.outputs.aws-session-token }}
+          use_existing_version_if_available: true #will deploy a version already in Elastic Beanstalk if it exists,
+          application_name: ${{ vars.EB_APP_NAME }}
+          environment_name: ${{ vars.EB_ENV_NAME }}
+          version_label: ${{ needs.init.outputs.preprod_version }}
+          region: us-west-2
+          deployment_package: ${{ github.event.repository.name }}-${{ needs.init.outputs.preprod_version }}.zip
+          version_description: ${{github.SHA}}

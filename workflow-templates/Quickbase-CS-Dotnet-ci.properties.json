@@ -1,6 +1,6 @@
 {
-    "name": "Quickbase-CS Dotnet Organization Workflow",
-    "description": "Deploy to AWS EB using manifest versioning",
+    "name": "Quickbase-CS Dotnet WebApp Organization Workflow",
+    "description": "Deploy Dotnet WebApp to AWS EB using manifest versioning",
     "iconName": "quickbase",
     "categories": [
         "dotnet",
