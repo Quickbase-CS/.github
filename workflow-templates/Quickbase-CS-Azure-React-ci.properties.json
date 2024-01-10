@@ -1,0 +1,14 @@
+{
+    "name": "Quickbase-CS React - Azure Webapp",
+    "description": "Quickbase-CS React Frontend Webapp (Deployed to Azure) starter workflow.",
+    "iconName": "quickbase",
+    "categories": [
+        "JavaScript",
+        "React",
+        "Node",
+        "NodeJS"
+    ],
+    "filePatterns": [
+        "package.json$"
+    ]
+}
