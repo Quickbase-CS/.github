@@ -1,0 +1,164 @@
+name: Deploy Frontend (React) App to Azure Deployment Slots
+
+on:
+  push:
+    branches:
+      - main
+      - development
+
+jobs:
+  init:
+    runs-on: ubuntu-latest
+    outputs:
+      run_prod: ${{ steps.check.outputs.run_prod || false }}
+      prod_version: ${{ steps.check.outputs.prod_version}}
+      run_dev: ${{ steps.check.outputs.run_dev || false }}
+      dev_version: ${{ steps.check.outputs.dev_version}}
+      run_preprod: ${{ steps.check.outputs.run_preprod || false }}
+      preprod_version: ${{ steps.check.outputs.preprod_version}}
+
+    # Tracks prod.manifest, dev.manifest and preprod.manifest file changes
+    steps:
+      - uses: actions/checkout@v3
+      - uses: dorny/paths-filter@v2
+        id: changes
+        with:
+          filters: |
+            prod:
+                - 'manifests/prod.manifest'
+            dev:
+                - 'manifests/dev.manifest'
+            preprod:
+                - 'manifests/preprod.manifest'
+
+      - name: Check for manifest updates
+        id: check
+        if: steps.changes.outputs.prod == 'true' || steps.changes.outputs.dev == 'true' || steps.changes.outputs.preprod == 'true'
+        run: |
+          run_environment () {
+            if [[ ${{ steps.changes.outputs.prod }} == "true" ]]; then
+                echo "run_prod=false" >> "$GITHUB_OUTPUT"
+            fi
+            if [[ ${{ steps.changes.outputs.dev }} == "true" ]]; then
+                echo "run_dev=false" >> "$GITHUB_OUTPUT"
+            fi 
+            if [[ ${{ steps.changes.outputs.preprod }} == "true" ]]; then
+                echo "run_preprod=false" >> "$GITHUB_OUTPUT"
+            fi
+          }      
+
+          # set version to the manifest file version
+          getManifestVersion () {
+            # Specify the file you want to read
+            file_path="$PWD/manifests/$1.manifest"
+
+            # Check if the file exists
+            if [ "$file_path" ]; then
+                # Read the first line of the file and store it in a variable
+                first_line=$(head -n 1 "$file_path")
+                
+                if [ "$first_line" ]; then
+                    echo "$1 version $first_line will get deployed"
+                    if [[ ${{ steps.changes.outputs.prod }} == "true" ]]; then
+                        echo "prod_version=$first_line" >> "$GITHUB_OUTPUT"
+                    fi
+                    if [[ ${{ steps.changes.outputs.dev }} == "true" ]]; then
+                        echo "dev_version=$first_line" >> "$GITHUB_OUTPUT"
+                    fi 
+                    if [[ ${{ steps.changes.outputs.preprod }} == "true" ]]; then
+                        echo "preprod_version=$first_line" >> "$GITHUB_OUTPUT"
+                    fi
+                else                    
+                    echo "Manifest version not found in file $file_path"
+                    run_environment $1
+                fi
+            else
+                echo "Manifest File not found: $file_path"
+                run_environment $1
+            fi
+          }  
+
+          if [[ ${{ steps.changes.outputs.prod }} == "true" ]]; then
+            echo "run_prod=true" >> "$GITHUB_OUTPUT"
+            getManifestVersion prod
+          fi
+
+          if [[ ${{ steps.changes.outputs.dev }} == "true" ]]; then
+            echo "run_dev=true" >> "$GITHUB_OUTPUT"
+            getManifestVersion dev
+          fi
+
+          if [[ ${{ steps.changes.outputs.preprod }} == "true" ]]; then
+            echo "run_preprod=true" >> "$GITHUB_OUTPUT"
+            getManifestVersion preprod
+          fi
+
+  # This workflow will generate the publish files to Azure Web app
+  prod_deploy:
+    needs: init
+    if: needs.init.outputs.run_prod == 'true'
+    runs-on: ubuntu-latest
+    environment: prod
+
+    # These permissions are needed to interact with GitHub's OIDC Token endpoint.
+    permissions:
+      id-token: write # required to use OIDC authentication for requesting the JWT
+      contents: read # This is required for actions/checkout
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v2
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: 18
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build React app
+        run: npm run build
+
+      - name: Deploy to Azure Web App (main branch to Prod slot)
+        if: ${{ github.ref == 'refs/heads/main' }}
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: ${{ secrets.AZURE_WEBAPP_NAME }} # Updated for Web App
+          publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE_PROD }} # Updated for Web App
+          package: ./build
+
+  # This workflow will generate the publish files to Azure Web app
+  dev_deploy:
+    needs: init
+    if: needs.init.outputs.run_dev == 'true'
+    runs-on: ubuntu-latest
+    environment: dev
+
+    # These permissions are needed to interact with GitHub's OIDC Token endpoint.
+    permissions:
+      id-token: write # required to use OIDC authentication for requesting the JWT
+      contents: read # This is required for actions/checkout
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v2
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: 18
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build React app
+        run: npm run build
+
+      - name: Deploy to Azure Web App (development branch to Dev slot)
+        if: ${{ github.ref == 'refs/heads/development' }}
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: ${{ secrets.AZURE_WEBAPP_NAME }} # Updated for Web App
+          publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE_DEV }} # Updated for Web App
+          package: ./build
