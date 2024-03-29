@@ -1,0 +1,111 @@
+# This workflow deploys your Node JS app to Azure web app using azure/webapps-deploy
+# This workflow will only run when code is merged to main branch and if there is any change 'manifest/*.manifest' file
+# For eg: To deploy to dev, add you version number in 'manifest/dev.manifest' file and merge to master. Similarly procedure is for prod and prod deployment.
+# Deployment merge should be performed one at a time
+
+# Prerequisites:
+#   1. Set up the `prod` and `dev` environments in repo
+#   2. Each environment should have below Environment variables and secrets:
+#      a. Environment variables:
+#         AZURE_FUNCTIONAPP_PUBLISH_PROFILE : This is your publish xml file downloaded from Azure function app
+#      b. Environment variables:
+#         AZURE_FUNCTIONAPP_NAME: should match azure function app name
+
+name: Deploy node.js app to Azure web app
+
+on:
+  push:
+    branches:
+      - main
+
+env: # environment variables (available in any part of the action)
+  NODE_VERSION: 18
+
+jobs:
+  init:
+    runs-on: ubuntu-latest
+    outputs:
+      run_env: ${{ steps.check.outputs.run_env || '' }}
+      run_version: ${{ steps.check.outputs.run_version || ''}}
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: changes
+        with:
+          filters: |
+            prod:
+                - 'manifests/prod.manifest'
+            dev:
+                - 'manifests/dev.manifest'
+            preprod:
+                - 'manifests/preprod.manifest'
+
+      - name: Check for manifest updates
+        id: check
+        if: steps.changes.outputs.prod == 'true' || steps.changes.outputs.dev == 'true'
+        run: |
+          # set version to the manifest file version
+          getManifestVersion () {
+            # Specify the file you want to read
+            file_path="$PWD/manifests/$1.manifest"
+
+            # Check if the file exists
+            if [ "$file_path" ]; then
+                # Read the first line of the file and store it in a variable
+                first_line=$(head -n 1 "$file_path")
+
+                if [ "$first_line" ]; then
+                    echo "$1 version $first_line will get deployed"
+                    if [[ ${{ steps.changes.outputs.prod }} == "true" ]]; then
+                        echo "run_version=$1-$first_line" >> "$GITHUB_OUTPUT"
+                    fi
+                    if [[ ${{ steps.changes.outputs.dev }} == "true" ]]; then
+                        echo "run_version=$1-$first_line" >> "$GITHUB_OUTPUT"
+                    fi
+                else
+                    echo "Manifest version not found in file $file_path"
+                fi
+            else
+                echo "Manifest file not found: $file_path"
+            fi
+          }
+
+          if [[ ${{ steps.changes.outputs.dev }} == "true" ]]; then
+            echo "run_env=dev" >> "$GITHUB_OUTPUT"
+            getManifestVersion dev
+          elif [[ ${{ steps.changes.outputs.prod }} == "true" ]]; then
+            echo "run_env=prod" >> "$GITHUB_OUTPUT"
+            getManifestVersion prod
+          else
+            echo "Manifest file updates not detected"
+          fi
+
+  build-and-deploy:
+    needs: init
+    if: needs.init.outputs.run_env && needs.init.outputs.run_version
+    runs-on: ubuntu-latest
+    environment: ${{ needs.init.outputs.run_env }}
+
+    steps:
+      - name: Set up Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Code Checkout
+        uses: actions/checkout@v4
+
+      - name: npm install, lint and build
+        run: |
+          npm install
+          npm run lint --if-present
+          npm run build --if-present
+
+      - name: Deploy to Azure App Service
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: ${{ vars.AZURE_WEBAPP_NAME }}
+          package: .
+          publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
+          # slot-name: ${{ vars.AZURE_SLOT_NAME }}

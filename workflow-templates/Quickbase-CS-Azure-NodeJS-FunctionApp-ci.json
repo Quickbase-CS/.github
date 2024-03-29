@@ -1,0 +1,12 @@
+{
+    "name": "Quickbase-CS NodeJS - Function app",
+    "description": "Deploys NodeJS to Function app using manifest versioning",
+    "iconName": "quickbase",
+    "categories": [
+        "Node",
+        "NodeJS"
+    ],
+    "filePatterns": [
+        "package.json$"
+    ]
+}

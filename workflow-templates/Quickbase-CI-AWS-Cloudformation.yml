@@ -1,0 +1,218 @@
+# This workflow deploys the defined cloudformation template
+# env TEMPLATE_FILE_PATH is path for your cloudformation template. You have place the 'cloudformation-template.yml' at the root of your project
+
+# This workflow will only run when code is merged to main branch and if there is any change 'manifest/*.manifest' file
+# For eg: To deploy to dev, add you version number in 'manifest/dev.manifest' file and merge to master. Similarly procedure is for prod and prod deployment.
+# Deployment merge should be performed one at a time
+
+# *PREREQUISITES*:
+#   The `aws cloudformation deploy` command in this workflow needs some parameters.
+#   These parameters are stored in `Environment variables`, `Organization variables` and `Organization secrets`
+#   Note: All these varaibles setup can only be done through Github Admin account access.
+
+# *Environment variables*:
+#   Following `Environment variables` should be set for `prod`, `preprod` and `dev` environments in your repository setting before using this template.
+#     IAM_GITHUB_ACTION_ROLE : should be set to Organization secret name AWS_IAM_GITHUB_ACTION_ROLE*
+#     ACM_CERTIFICATE_ARN : should be set to Organization secret name AWS_ACM_CERTIFICATE_ARN*
+#     CLOUDFRONT_HOSTED_ZONE_ID : should be set to Organization secret name AWS_CLOUDFRONT_HOSTED_ZONE_ID*
+#     CLOUDFORMATION_IAM_ROLE : should be set to Organization secret name AWS_CLOUDFORMATION_IAM_ROLE*
+#   Further these `Environment variables` values are getting referenced through the `Organization secrets` and it must be configured before using this template
+
+# *Organization secrets*:
+#   In the above Organization secret names, '*' denotes _DEV, _PROD and _PREPROD.
+#   Organization secrets URL(Admin access only): https://github.com/organizations/Quickbase-CS/settings/secrets/actions
+#   for eg `_DEV`:
+#     IAM_GITHUB_ACTION_ROLE. This is the `ARN` name in IAM>Role that is configured to authenticate AWS using OpenID Connect. More Info: https://docs.github.com/en/actions/deployment/security-hardening-your-deployments/configuring-openid-connect-in-amazon-web-services
+#     AWS_CLOUDFORMATION_IAM_ROLE_DEV. This is the `Role name` in IAM>Roles that has 2 policies attached `AdministratorAccess` and `S3PutBucketPolicyAccess`
+#     AWS_ACM_CERTIFICATE_ARN_DEV. This is the `ARN` name in your AWS Certificate Manager>Certificates in AWS `N. Virginia` Region
+#     AWS_CLOUDFRONT_HOSTED_ZONE_DEV.This is the `Hosted zone ID` from Route 53>Hosted zones. This should be correspond with Organization variable DOMAIN_DEV
+#   Similarly, make sure to set all these Organization secrets name properly appending each with _DEV, _PROD and _PREPROD for their respective environments.
+
+#   All these `Environment variables` start with `vars.` in this workflow and the values are getting referenced from `Organization secrets`
+#   eg:   secrets[vars.*]
+
+# *Organization variables*:
+#   Following `Organization variables` are used to get the domain name based on the environment you are deploying
+#   Organization variables URL(Admin access only): https://github.com/organizations/Quickbase-CS/settings/variables/actions
+#     1. DOMAIN_DEV = projectservices.myquickbase.net is for dev domain
+#     2. DOMAIN_PROD = projectservices.quickbase.com is for prod domain
+#     3. DOMAIN_PREPROD = projectservices.quickbaserocks.com is for preprod domain
+
+name: Deploy CloudFormation Stack
+
+on:
+  push:
+    branches: [main]
+
+env: # environment variables (available in any part of the action)
+  NODE_VERSION: 18
+  STACK_NAME: ${{ github.event.repository.name }}
+  TEMPLATE_FILE_PATH: ./cloudformation-template.yml # template is placed at root folder
+  AWS_REGION: us-west-2
+
+jobs:
+  init:
+    runs-on: ubuntu-latest
+    outputs:
+      run_env: ${{ steps.check.outputs.run_env || '' }}
+      run_version: ${{ steps.check.outputs.run_version || ''}}
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: changes
+        with:
+          base: ${{ github.ref }}
+          filters: |
+            dev:
+              - 'manifests/dev.manifest'
+            preprod:
+              - 'manifests/preprod.manifest'
+            prod:
+              - 'manifests/prod.manifest'
+
+      - name: Check for manifest updates
+        id: check
+        if: steps.changes.outputs.prod == 'true' || steps.changes.outputs.preprod == 'true' || steps.changes.outputs.dev == 'true'
+        run: |
+          # set version to the manifest file version
+          getManifestVersion () {
+            # Specify the file you want to read
+            file_path="$PWD/manifests/$1.manifest"
+
+            # Check if the file exists
+            if [ "$file_path" ]; then
+                # Read the first line of the file and store it in a variable
+                first_line=$(head -n 1 "$file_path")
+
+                if [ "$first_line" ]; then
+                    echo "$1 version $first_line will get deployed"
+                    if [[ ${{ steps.changes.outputs.dev }} == "true" ]]; then
+                        echo "run_version=$1-$first_line" >> "$GITHUB_OUTPUT"
+                    fi
+                    if [[ ${{ steps.changes.outputs.preprod }} == "true" ]]; then
+                        echo "run_version=$1-$first_line" >> "$GITHUB_OUTPUT"
+                    fi
+                    if [[ ${{ steps.changes.outputs.prod }} == "true" ]]; then
+                        echo "run_version=$1-$first_line" >> "$GITHUB_OUTPUT"
+                    fi
+
+                else
+                    echo "Manifest version not found in file $file_path"
+                fi
+            else
+                echo "Manifest file not found: $file_path"
+            fi
+          }
+
+          if [[ ${{ steps.changes.outputs.dev }} == "true" ]]; then
+            echo "run_env=dev" >> "$GITHUB_OUTPUT"
+            getManifestVersion dev
+          elif [[ ${{ steps.changes.outputs.preprod }} == "true" ]]; then
+            echo "run_env=preprod" >> "$GITHUB_OUTPUT"
+            getManifestVersion preprod
+          elif [[ ${{ steps.changes.outputs.prod }} == "true" ]]; then
+            echo "run_env=prod" >> "$GITHUB_OUTPUT"
+            getManifestVersion prod
+          else
+            echo "Manifest file updates not detected"
+          fi
+
+  deploy:
+    needs: init
+    if: needs.init.outputs.run_env && needs.init.outputs.run_version
+    runs-on: ubuntu-latest
+    environment: ${{ needs.init.outputs.run_env }}
+
+    # These permissions are needed to interact with GitHub's OIDC Token endpoint.
+    permissions:
+      id-token: write # required to use OIDC authentication for requesting the JWT
+      contents: write # This is required for actions/checkout
+
+    steps:
+      - name: Install NodeJS
+        uses: actions/setup-node@v3
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Code Checkout
+        uses: actions/checkout@v4
+
+      - name: Replace special characters in stack name
+        id: sanitize-stack-name
+        run: |
+          sanitized_stack_name=$(echo ${{ env.STACK_NAME }} | sed 's/[^a-zA-Z0-9]/-/g')
+          echo "sanitized-stack-name=$sanitized_stack_name"
+          echo "sanitized-stack-name=$sanitized_stack_name" >> $GITHUB_OUTPUT
+
+      - name: Get Domain name
+        id: domain-name
+        run: |
+          if [[ ${{ needs.init.outputs.run_env }} == "dev" ]]; then
+              echo "domain-name=${{ vars.DOMAIN_DEV }}" >> "$GITHUB_OUTPUT"
+          fi
+          if [[ ${{ needs.init.outputs.run_env }} == "prod" ]]; then
+              echo "domain-name=${{ vars.DOMAIN_PROD }}" >> "$GITHUB_OUTPUT"
+          fi
+          if [[ ${{ needs.init.outputs.run_env }} == "preprod" ]]; then
+              echo "domain-name=${{ vars.DOMAIN_PREPROD }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Get S3 bucket name
+        id: bucket-name
+        run: |
+          bucket_name=$(echo ${{ steps.sanitize-stack-name.outputs.sanitized-stack-name }}-${{ needs.init.outputs.run_env }})
+          echo "bucket-name=$bucket_name"
+          echo "bucket-name=$bucket_name" >> $GITHUB_OUTPUT
+
+      - name: Install expect
+        run: sudo apt-get install -y expect
+
+      - name: npm install, lint and build
+        run: |
+          npm install
+          npm run lint --if-present
+          npm run build:${{ needs.init.outputs.run_env }} --if-present
+
+      - name: Configure AWS Credentials
+        id: creds
+        uses: aws-actions/configure-aws-credentials@v3
+        with:
+          role-to-assume: ${{ secrets[vars.IAM_GITHUB_ACTION_ROLE] }}
+          aws-region: ${{ env.AWS_REGION }}
+          output-credentials: true
+
+      - name: Deploy CloudFormation Stack
+        env:
+          STACK_NAME: ${{ steps.sanitize-stack-name.outputs.sanitized-stack-name }}
+          AWS_REGION: ${{ env.AWS_REGION }}
+        run: |
+          aws cloudformation deploy \
+          --stack-name $STACK_NAME \
+          --region $AWS_REGION \
+          --template-file $TEMPLATE_FILE_PATH \
+          --parameter-overrides AcmCertificateArn=${{ secrets[vars.ACM_CERTIFICATE_ARN] }} \
+              S3BucketName=${{ steps.bucket-name.outputs.bucket-name }} \
+              DomainName=$STACK_NAME.${{ steps.domain-name.outputs.domain-name }} \
+              HostedZoneId=${{ secrets[vars.CLOUDFRONT_HOSTED_ZONE_ID] }} \
+              MyIAMRole=${{ secrets[vars.CLOUDFORMATION_IAM_ROLE] }} \
+          --capabilities CAPABILITY_NAMED_IAM
+
+      - name: Wait for CloudFormation Stack to Complete
+        run: |
+          aws cloudformation wait stack-create-complete --stack-name ${{ steps.sanitize-stack-name.outputs.sanitized-stack-name }}
+
+      - name: Deploy to S3
+        run: |
+          aws s3 sync ./build s3://${{ steps.bucket-name.outputs.bucket-name }} --delete
+        env:
+          AWS_ACCESS_KEY_ID: ${{ steps.creds.outputs.aws-access-key-id }}
+          AWS_SECRET_ACCESS_KEY: ${{ steps.creds.outputs.aws-secret-access-key }}
+
+      # - name: Create Tag for prod deployment
+      - run: |
+          # create tag
+          if [[ ${{ needs.init.outputs.run_env }} == "prod" ]]; then
+            git tag ${{ needs.init.outputs.run_version }}
+            git push origin ${{ needs.init.outputs.run_version }}
+          fi
