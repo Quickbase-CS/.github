@@ -165,9 +165,6 @@ jobs:
           echo "bucket-name=$bucket_name"
           echo "bucket-name=$bucket_name" >> $GITHUB_OUTPUT
 
-      - name: Install expect
-        run: sudo apt-get install -y expect
-
       - name: npm install, lint and build
         run: |
           npm install
