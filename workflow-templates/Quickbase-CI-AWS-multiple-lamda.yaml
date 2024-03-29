@@ -1,6 +1,6 @@
 # This workflow is set to deploy individual lambda service that are maintained under '/services' folder.
 # Each individual lambda service folder should have their manifest versioning enabled for the deployment
-# In `Determine Changed Service` step rename the service folder name as per your folder system and you can Add more services condition as the service folder grows
+# In `Determine Changed Service` step rename the service folder name as per your folder system and you can Add more `elif` condition as the service folder grows
 
 # Prerequisites:
 #   1. Set up the `prod`, `preprod` and `dev` environments in repo
@@ -8,6 +8,7 @@
 #      a. Environment variables:
 #         DEPLOY_ROLE : This varaible get referenced through Origanization secret AWS_LAMBDA_DEPLOY_ROLE_DEV
 # Origanization secret  AWS_LAMBDA_DEPLOY_ROLE_DEV is the `ARN` name in IAM>Role that is configured to authenticate AWS using OpenID Connect.
+# _DEV at the end of the text denotes dev environment. Similarly, make sure to set all these Organization secrets name properly appending each with _DEV, _PROD and _PREPROD for their respective environments.
 # More Info on OpenID Connect: https://docs.github.com/en/actions/deployment/security-hardening-your-deployments/configuring-openid-connect-in-amazon-web-services
 
 name: Deploy Lambda Functions individually from multiple service folders
