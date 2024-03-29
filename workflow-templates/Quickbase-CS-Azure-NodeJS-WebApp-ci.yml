@@ -6,7 +6,7 @@
 # Prerequisites:
 #   1. Set up the `prod` and `dev` environments in repo
 #   2. Each environment should have below Environment variables and secrets:
-#      a. Environment variables:
+#      a. Environment secrets:
 #         AZURE_FUNCTIONAPP_PUBLISH_PROFILE : This is your publish xml file downloaded from Azure function app
 #      b. Environment variables:
 #         AZURE_FUNCTIONAPP_NAME: should match azure function app name

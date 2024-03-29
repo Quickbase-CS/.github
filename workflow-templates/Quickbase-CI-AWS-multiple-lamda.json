@@ -1,0 +1,12 @@
+{
+  "name": "Quickbase-CS NodeJS - Multiple lambda service",
+  "description": "Deploys NodeJS to AWS lambda service placed under 'services/' folder using manifest versioning",
+  "iconName": "quickbase",
+  "categories": [
+    "Node",
+    "NodeJS"
+  ],
+  "filePatterns": [
+    "package.json$"
+  ]
+}
