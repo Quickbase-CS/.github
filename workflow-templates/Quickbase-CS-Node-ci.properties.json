@@ -1,7 +1,0 @@
-{
-  "name": "Quickbase-CS Organization Lambda NodeJS Workflow",
-  "description": "Quickbase-CS Organization CI starter workflow for Node JS lambda function.",
-  "iconName": "quickbase",
-  "categories": ["Node"],
-  "filePatterns": ["package.json$"]
-}

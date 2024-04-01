@@ -1,8 +1,11 @@
 # This workflow is set to deploy individual lambda service that are maintained under '/services' folder.
-# Each individual lambda service folder should have their manifest versioning enabled for the deployment
-# In `Determine Changed Service` step rename the service folder name as per your folder system and you can Add more `elif` condition as the service folder grows
 
-# Prerequisites:
+# **Instructions**:
+# Each individual lambda service folder should have their manifest versioning enabled for the deployment
+# In step `Determine Changed Service` rename the service folder name as per your folder names and you can add more `elif` condition as the service folder grows
+# For example, in this template, you have replace LambaService1 and LambaService2 folder names to your appropriate folder names.
+
+# **Prerequisites**:
 #   1. Set up the `prod`, `preprod` and `dev` environments in repo
 #   2. Each environment should have below Environment variables:
 #      a. Environment variables:
@@ -23,7 +26,7 @@ env: # environment variables (available in any part of the action)
   AWS_REGION: us-west-2
 
 jobs:
-  determine-changes:
+  init:
     runs-on: ubuntu-latest
 
     outputs:
@@ -64,12 +67,12 @@ jobs:
             echo "service=LambaService2" >> "$GITHUB_OUTPUT"
           ### Add more services as needed
           else
-            echo ""
+            echo "No manifest file change was detected"
           fi
 
-  init:
-    needs: determine-changes
-    if: needs.determine-changes.outputs.service
+  determine-changes:
+    needs: init
+    if: needs.init.outputs.service
     runs-on: ubuntu-latest
     outputs:
       run_env: ${{ steps.check.outputs.run_env || '' }}
@@ -84,11 +87,11 @@ jobs:
           base: ${{ github.ref }}
           filters: |
             dev:
-              - 'services/${{ needs.determine-changes.outputs.service }}/manifests/dev.manifest'
+              - 'services/${{ needs.init.outputs.service }}/manifests/dev.manifest'
             preprod:
-              - 'services/${{ needs.determine-changes.outputs.service }}/manifests/preprod.manifest'
+              - 'services/${{ needs.init.outputs.service }}/manifests/preprod.manifest'
             prod:
-              - 'services/${{ needs.determine-changes.outputs.service }}/manifests/prod.manifest'
+              - 'services/${{ needs.init.outputs.service }}/manifests/prod.manifest'
 
       - name: Check for manifest updates
         id: check
@@ -97,7 +100,7 @@ jobs:
           # set version to the manifest file version
           getManifestVersion () {
             # Specify the file you want to read
-            file_path="$PWD/services/${{ needs.determine-changes.outputs.service }}/manifests/$1.manifest"
+            file_path="$PWD/services/${{ needs.init.outputs.service }}/manifests/$1.manifest"
 
             # Check if the file exists
             if [ "$file_path" ]; then
@@ -105,7 +108,7 @@ jobs:
                 first_line=$(head -n 1 "$file_path")
 
                 if [ "$first_line" ]; then
-                    echo "${{ needs.determine-changes.outputs.service }} $1 version $first_line will get deployed"
+                    echo "${{ needs.init.outputs.service }} $1 version $first_line will get deployed"
                     if [[ ${{ steps.changes.outputs.dev }} == "true" ]]; then
                         echo "run_version=$1-$first_line" >> "$GITHUB_OUTPUT"
                     fi
@@ -124,7 +127,7 @@ jobs:
             fi
           }
 
-          echo "service=${{ needs.determine-changes.outputs.service }}" >> "$GITHUB_OUTPUT"
+          echo "service=${{ needs.init.outputs.service }}" >> "$GITHUB_OUTPUT"
 
           if [[ ${{ steps.changes.outputs.dev }} == "true" ]]; then
             echo "run_env=dev" >> "$GITHUB_OUTPUT"
@@ -141,10 +144,10 @@ jobs:
 
   # This workflow will generate the publish files, zip it for AWS beanstalk deployment
   deploy:
-    needs: init
-    if: needs.init.outputs.run_env && needs.init.outputs.run_version
+    needs: determine-changes
+    if: needs.determine-changes.outputs.run_env && needs.determine-changes.outputs.run_version
     runs-on: ubuntu-latest
-    environment: ${{ needs.init.outputs.run_env }}
+    environment: ${{ needs.determine-changes.outputs.run_env }}
 
     # These permissions are needed to interact with GitHub's OIDC Token endpoint.
     permissions:
@@ -167,10 +170,10 @@ jobs:
           echo "sanitized-repo-name=$sanitized_repo_name" >> $GITHUB_OUTPUT
 
       - name: Install Dependencies
-        run: cd services/${{ needs.init.outputs.service }} && npm install
+        run: cd services/${{ needs.determine-changes.outputs.service }} && npm install
 
       - name: Code linting
-        run: cd services/${{ needs.init.outputs.service }} && npm run lint
+        run: cd services/${{ needs.determine-changes.outputs.service }} && npm run lint
 
       - name: Configure AWS Credentials
         id: creds
@@ -182,15 +185,15 @@ jobs:
 
         # authentication
       - name: Serverless AWS authentication
-        run: cd services/${{ needs.init.outputs.service }} && node_modules/.bin/serverless config credentials --provider aws --key ${{ steps.creds.outputs.aws-access-key-id }} --secret ${{ steps.creds.outputs.aws-secret-access-key }}
+        run: cd services/${{ needs.determine-changes.outputs.service }} && node_modules/.bin/serverless config credentials --provider aws --key ${{ steps.creds.outputs.aws-access-key-id }} --secret ${{ steps.creds.outputs.aws-secret-access-key }}
 
       - name: Deploy
-        run: cd services/${{ needs.init.outputs.service }} && node_modules/.bin/serverless deploy --param=repo=${{ steps.sanitize-repo-name.outputs.sanitized-repo-name }} --region ${{ env.AWS_REGION }} --stage ${{ needs.init.outputs.run_env }}
+        run: cd services/${{ needs.determine-changes.outputs.service }} && node_modules/.bin/serverless deploy --param=repo=${{ steps.sanitize-repo-name.outputs.sanitized-repo-name }} --region ${{ env.AWS_REGION }} --stage ${{ needs.determine-changes.outputs.run_env }}
 
       # - name: Create Tag
       - run: |
           # create tag
-          if [[ ${{ needs.init.outputs.run_env }} == "prod" ]]; then
-            git tag ${{ needs.init.outputs.run_version }}
-            git push origin ${{ needs.init.outputs.run_version }}
+          if [[ ${{ needs.determine-changes.outputs.run_env }} == "prod" ]]; then
+            git tag ${{ needs.determine-changes.outputs.run_version }}
+            git push origin ${{ needs.determine-changes.outputs.run_version }}
           fi
