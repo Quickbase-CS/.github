@@ -3,15 +3,15 @@
 # **Instructions**:
 # Each individual lambda service folder should have their manifest versioning enabled for the deployment
 # In step `Determine Changed Service` rename the service folder name as per your folder names and you can add more `elif` condition as the service folder grows
-# For example, in this template, you have replace LambaService1 and LambaService2 folder names to your appropriate folder names.
+# For example, in this template, you have to replace LambaService1 and LambaService2 folder names to your appropriate folder names.
 
 # **Prerequisites**:
 #   1. Set up the `prod`, `preprod` and `dev` environments in repo
 #   2. Each environment should have below Environment variables:
 #      a. Environment variables:
-#         DEPLOY_ROLE : This varaible get referenced through Origanization secret AWS_LAMBDA_DEPLOY_ROLE_DEV
-# Origanization secret  AWS_LAMBDA_DEPLOY_ROLE_DEV is the `ARN` name in IAM>Role that is configured to authenticate AWS using OpenID Connect.
-# _DEV at the end of the text denotes dev environment. Similarly, make sure to set all these Organization secrets name properly appending each with _DEV, _PROD and _PREPROD for their respective environments.
+#         DEPLOY_ROLE : This varaible get referenced through Organization secret name AWS_LAMBDA_DEPLOY_ROLE_DEV
+# Here, Organization secret AWS_LAMBDA_DEPLOY_ROLE_DEV is the `ARN` name in IAM>Role that is configured to authenticate AWS using OpenID Connect.
+# Here, _DEV at the end of the text denotes dev environment. Similarly, make sure to set all these Organization secrets name properly appending each with _DEV, _PROD and _PREPROD for their respective environments.
 # More Info on OpenID Connect: https://docs.github.com/en/actions/deployment/security-hardening-your-deployments/configuring-openid-connect-in-amazon-web-services
 
 name: Deploy Lambda Functions individually from multiple service folders
