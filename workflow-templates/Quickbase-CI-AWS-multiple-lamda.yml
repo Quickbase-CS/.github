@@ -7,7 +7,7 @@
 
 # **Prerequisites**:
 #   1. Set up the `prod`, `preprod` and `dev` environments in repo
-#   2. Each environment should have below Environment variables:
+#   2. Each environment should have below repo Environment variables:
 #      a. Environment variables:
 #         DEPLOY_ROLE : This varaible get referenced through Organization secret name AWS_LAMBDA_DEPLOY_ROLE_DEV
 # Here, Organization secret AWS_LAMBDA_DEPLOY_ROLE_DEV is the `ARN` name in IAM>Role that is configured to authenticate AWS using OpenID Connect.
