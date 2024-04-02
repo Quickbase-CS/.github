@@ -30,7 +30,7 @@ jobs:
     runs-on: ubuntu-latest
 
     outputs:
-      service: ${{ steps.set_service.outputs.service }}
+      service: ${{ steps.set-service.outputs.service }}
 
     steps:
       - name: Checkout code
