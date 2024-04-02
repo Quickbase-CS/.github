@@ -49,13 +49,13 @@ jobs:
         env:
           ALL_CHANGED_FILES: ${{ steps.changed-files.outputs.all_changed_files }}
         run: |
-          # echo ${ALL_CHANGED_FILES[0]}
+          # echo ${ALL_CHANGED_FILES}
           # for file in ${ALL_CHANGED_FILES}; do
           #   echo "$file was changed"
           # done
 
-          # get the first changes file as deployments are/should be done for individual environment
-          CHANGED_FILES=$(dirname ${ALL_CHANGED_FILES[0]})
+          # get the parent directory name
+          CHANGED_FILES=$(dirname ${ALL_CHANGED_FILES})
           echo $CHANGED_FILES
 
           # Check if files in a specific service directory have changed
