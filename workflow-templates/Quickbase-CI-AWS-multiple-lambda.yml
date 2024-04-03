@@ -170,7 +170,9 @@ jobs:
           echo "sanitized-repo-name=$sanitized_repo_name" >> $GITHUB_OUTPUT
 
       - name: Install Dependencies
-        run: cd services/${{ needs.determine-changes.outputs.service }} && npm install
+        run: |
+          npm install --if-present
+          cd services/${{ needs.determine-changes.outputs.service }} && npm install
 
       - name: Code linting
         run: cd services/${{ needs.determine-changes.outputs.service }} && npm run lint
