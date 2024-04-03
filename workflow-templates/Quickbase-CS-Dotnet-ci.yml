@@ -18,8 +18,8 @@ jobs:
 
     # Tracks prod.manifest, dev.manifest and preprod.manifest file changes
     steps:
-      - uses: actions/checkout@v3
-      - uses: dorny/paths-filter@v2
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
         id: changes
         with:
           filters: |
@@ -109,7 +109,7 @@ jobs:
 
     steps:
       - name: Git setup
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Dotnet run
         uses: actions/setup-dotnet@v3
@@ -160,7 +160,7 @@ jobs:
 
     steps:
       - name: Git setup
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Dotnet run
         uses: actions/setup-dotnet@v3
@@ -211,7 +211,7 @@ jobs:
 
     steps:
       - name: Git setup
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Dotnet run
         uses: actions/setup-dotnet@v3

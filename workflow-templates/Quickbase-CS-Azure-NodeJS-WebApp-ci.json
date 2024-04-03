@@ -1,0 +1,12 @@
+{
+    "name": "Quickbase-CS NodeJS - Azure Webapp",
+    "description": "Deploys NodeJS to Azure WebApp using manifest versioning",
+    "iconName": "quickbase",
+    "categories": [
+        "Node",
+        "NodeJS"
+    ],
+    "filePatterns": [
+        "package.json$"
+    ]
+}

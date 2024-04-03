@@ -1,0 +1,201 @@
+# This workflow is set to deploy individual lambda service that are maintained under '/services' folder.
+
+# **Instructions**:
+# Each individual lambda service folder should have their manifest versioning enabled for the deployment
+# In step `Determine Changed Service` rename the service folder name as per your folder names and you can add more `elif` condition as the service folder grows
+# For example, in this template, you have to replace LambaService1 and LambaService2 folder names to your appropriate folder names.
+
+# **Prerequisites**:
+#   1. Set up the `prod`, `preprod` and `dev` environments in repo
+#   2. Each environment should have below repo Environment variables:
+#      a. Environment variables:
+#         DEPLOY_ROLE : This varaible get referenced through Organization secret name AWS_LAMBDA_DEPLOY_ROLE_DEV
+# Here, Organization secret AWS_LAMBDA_DEPLOY_ROLE_DEV is the `ARN` name in IAM>Role that is configured to authenticate AWS using OpenID Connect.
+# Here, _DEV at the end of the text denotes dev environment. Similarly, make sure to set all these Organization secrets name properly appending each with _DEV, _PROD and _PREPROD for their respective environments.
+# More Info on OpenID Connect: https://docs.github.com/en/actions/deployment/security-hardening-your-deployments/configuring-openid-connect-in-amazon-web-services
+
+name: Deploy Lambda Functions individually from multiple service folders
+
+on:
+  push:
+    branches: [main]
+
+env: # environment variables (available in any part of the action)
+  NODE_VERSION: 18
+  REPO_NAME: ${{ github.event.repository.name }}
+  AWS_REGION: us-west-2
+
+jobs:
+  init:
+    runs-on: ubuntu-latest
+
+    outputs:
+      service: ${{ steps.set-service.outputs.service }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Get any changes in manifest files
+        id: changed-files
+        uses: tj-actions/changed-files@v44
+        with:
+          files: |
+            services/**/*.manifest
+
+      - name: Determine Changed Service
+        id: set-service
+        if: steps.changed-files.outputs.any_changed == 'true'
+        env:
+          ALL_CHANGED_FILES: ${{ steps.changed-files.outputs.all_changed_files }}
+        run: |
+          # echo ${ALL_CHANGED_FILES}
+          # for file in ${ALL_CHANGED_FILES}; do
+          #   echo "$file was changed"
+          # done
+
+          # get the parent directory name
+          CHANGED_FILES=$(dirname ${ALL_CHANGED_FILES})
+          echo $CHANGED_FILES
+
+          # Check if files in a specific service directory have changed
+          if [[ "$CHANGED_FILES" == "services/LambaService1/manifests" ]]; then
+            echo "Detected deployment for LambaService1"
+            echo "service=LambaService1" >> "$GITHUB_OUTPUT"
+          elif [[ "$CHANGED_FILES" == "services/LambaService2/manifests" ]]; then
+            echo "Detected deployment for LambaService2"
+            echo "service=LambaService2" >> "$GITHUB_OUTPUT"
+          ### Add more services as needed
+          else
+            echo "No manifest file change was detected"
+          fi
+
+  determine-changes:
+    needs: init
+    if: needs.init.outputs.service
+    runs-on: ubuntu-latest
+    outputs:
+      run_env: ${{ steps.check.outputs.run_env || '' }}
+      run_version: ${{ steps.check.outputs.run_version || ''}}
+      service: ${{ steps.check.outputs.service || ''}}
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: changes
+        with:
+          base: ${{ github.ref }}
+          filters: |
+            dev:
+              - 'services/${{ needs.init.outputs.service }}/manifests/dev.manifest'
+            preprod:
+              - 'services/${{ needs.init.outputs.service }}/manifests/preprod.manifest'
+            prod:
+              - 'services/${{ needs.init.outputs.service }}/manifests/prod.manifest'
+
+      - name: Check for manifest updates
+        id: check
+        if: steps.changes.outputs.prod == 'true' || steps.changes.outputs.preprod == 'true' || steps.changes.outputs.dev == 'true'
+        run: |
+          # set version to the manifest file version
+          getManifestVersion () {
+            # Specify the file you want to read
+            file_path="$PWD/services/${{ needs.init.outputs.service }}/manifests/$1.manifest"
+
+            # Check if the file exists
+            if [ "$file_path" ]; then
+                # Read the first line of the file and store it in a variable
+                first_line=$(head -n 1 "$file_path")
+
+                if [ "$first_line" ]; then
+                    echo "${{ needs.init.outputs.service }} $1 version $first_line will get deployed"
+                    if [[ ${{ steps.changes.outputs.dev }} == "true" ]]; then
+                        echo "run_version=$1-$first_line" >> "$GITHUB_OUTPUT"
+                    fi
+                    if [[ ${{ steps.changes.outputs.preprod }} == "true" ]]; then
+                        echo "run_version=$1-$first_line" >> "$GITHUB_OUTPUT"
+                    fi
+                    if [[ ${{ steps.changes.outputs.prod }} == "true" ]]; then
+                        echo "run_version=$1-$first_line" >> "$GITHUB_OUTPUT"
+                    fi
+
+                else
+                    echo "Manifest version not found in file $file_path"
+                fi
+            else
+                echo "Manifest file not found: $file_path"
+            fi
+          }
+
+          echo "service=${{ needs.init.outputs.service }}" >> "$GITHUB_OUTPUT"
+
+          if [[ ${{ steps.changes.outputs.dev }} == "true" ]]; then
+            echo "run_env=dev" >> "$GITHUB_OUTPUT"
+            getManifestVersion dev
+          elif [[ ${{ steps.changes.outputs.preprod }} == "true" ]]; then
+            echo "run_env=preprod" >> "$GITHUB_OUTPUT"
+            getManifestVersion preprod
+          elif [[ ${{ steps.changes.outputs.prod }} == "true" ]]; then
+            echo "run_env=prod" >> "$GITHUB_OUTPUT"
+            getManifestVersion prod
+          else
+            echo "Manifest file updates not detected"
+          fi
+
+  # This workflow will generate the publish files, zip it for AWS beanstalk deployment
+  deploy:
+    needs: determine-changes
+    if: needs.determine-changes.outputs.run_env && needs.determine-changes.outputs.run_version
+    runs-on: ubuntu-latest
+    environment: ${{ needs.determine-changes.outputs.run_env }}
+
+    # These permissions are needed to interact with GitHub's OIDC Token endpoint.
+    permissions:
+      id-token: write # required to use OIDC authentication for requesting the JWT
+      contents: write # This is required for actions/checkout
+
+    steps:
+      - name: Code Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up NodeJS
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Replace special characters in repo name
+        id: sanitize-repo-name
+        run: |
+          sanitized_repo_name=$(echo "$REPO_NAME" | sed 's/[^a-zA-Z0-9]/-/g')
+          echo "sanitized-repo-name=$sanitized_repo_name" >> $GITHUB_OUTPUT
+
+      - name: Install Dependencies
+        run: |
+          npm install --if-present
+          cd services/${{ needs.determine-changes.outputs.service }} && npm install
+
+      - name: Code linting
+        run: cd services/${{ needs.determine-changes.outputs.service }} && npm run lint
+
+      - name: Configure AWS Credentials
+        id: creds
+        uses: aws-actions/configure-aws-credentials@v3
+        with:
+          role-to-assume: ${{ secrets[vars.DEPLOY_ROLE] }}
+          aws-region: ${{ env.AWS_REGION }}
+          output-credentials: true
+
+        # authentication
+      - name: Serverless AWS authentication
+        run: cd services/${{ needs.determine-changes.outputs.service }} && node_modules/.bin/serverless config credentials --provider aws --key ${{ steps.creds.outputs.aws-access-key-id }} --secret ${{ steps.creds.outputs.aws-secret-access-key }}
+
+      - name: Deploy
+        run: cd services/${{ needs.determine-changes.outputs.service }} && node_modules/.bin/serverless deploy --param=repo=${{ steps.sanitize-repo-name.outputs.sanitized-repo-name }} --region ${{ env.AWS_REGION }} --stage ${{ needs.determine-changes.outputs.run_env }}
+
+      # - name: Create Tag
+      - run: |
+          # create tag
+          if [[ ${{ needs.determine-changes.outputs.run_env }} == "prod" ]]; then
+            git tag ${{ needs.determine-changes.outputs.run_version }}
+            git push origin ${{ needs.determine-changes.outputs.run_version }}
+          fi

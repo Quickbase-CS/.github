@@ -1,0 +1,14 @@
+{
+    "name": "Quickbase-CS Deploy cloudformation",
+    "description": "Deploys AWS CloudFormation Stack using manifest versioning and cloudformation-template.yml",
+    "iconName": "quickbase",
+    "categories": [
+        "JavaScript",
+        "React",
+        "Node",
+        "NodeJS"
+    ],
+    "filePatterns": [
+        "cloudformation-template.yml$"
+    ]
+}
