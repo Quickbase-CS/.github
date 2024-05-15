@@ -1,0 +1,206 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Project Services provision ec2 machine
+Parameters:
+  VPCStackName:
+    Type: String
+    Default: general-vpc
+  ServiceName:
+    Type: String
+    Default: project-services
+  InstanceSize:
+    Type: String
+    Default: t2.large
+  Environment:
+    Type: String
+    Default: preprod
+  BastionStackName:
+    Type: String
+    Default: bastion
+  ALBCertificate:
+    Type: String
+    Description: Provide the ARN of the certificate to be used for the ALB
+    Default: arn:aws:acm:us-west-2:126484371561:certificate/e2dd50a7-d309-436e-9f5f-c7f2fd7d114f
+  AMITriggerParam:
+    Type: String
+    Description: Trigger parameter to force executing lambda function. Set the value to current timestamp
+    Default: 1
+
+Resources:
+  LBSecurityGroup:
+    Type: "AWS::EC2::SecurityGroup"
+    Properties:
+      GroupDescription: "ELB Security Group"
+      VpcId: !Sub "{{resolve:ssm:/AccountSettings/vpc/${VPCStackName}/VpcId}}"
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+      SecurityGroupEgress:
+        # Allow all traffic to anything else in this VPC
+        - IpProtocol: -1
+          CidrIp: !Sub "{{resolve:ssm:/AccountSettings/vpc/${VPCStackName}/VpcCidr}}"
+
+  InstanceSecurityGroup:
+    Type: "AWS::EC2::SecurityGroup"
+    Properties:
+      GroupDescription: RDP from Bastion on 3389
+      VpcId: !Sub "{{resolve:ssm:/AccountSettings/vpc/${VPCStackName}/VpcId}}"
+      SecurityGroupIngress:
+        # Allow RDP from bastion
+        - IpProtocol: tcp
+          FromPort: 3389
+          ToPort: 3389
+          SourceSecurityGroupId:
+            "Fn::ImportValue": !Sub ${BastionStackName}-BASTIONSGID
+        # Allow 443 from elb
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          SourceSecurityGroupId: !GetAtt LBSecurityGroup.GroupId
+      SecurityGroupEgress:
+        # Allow all traffic to anything else in this VPC
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+
+  EC2Instance:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !GetAtt GetLatestAmiByName.ami
+      InstanceType: !Ref InstanceSize
+      IamInstanceProfile: !Ref InstanceProfile
+      SecurityGroupIds:
+        - !Ref InstanceSecurityGroup
+      SubnetId: !Sub "{{resolve:ssm:/AccountSettings/vpc/${VPCStackName}/NatSubnetAZ1}}"
+      BlockDeviceMappings:
+        - DeviceName: /dev/sda1
+          Ebs:
+            VolumeSize: 120
+            VolumeType: gp3
+      Tags:
+        - Key: Name
+          Value: !Ref AWS::StackName
+        - Key: ServiceName
+          Value: !Ref ServiceName
+        - Key: HostingProvider
+          Value: AWS
+        - Key: Location
+          Value: !Ref AWS::Region
+        - Key: isPet
+          Value: "true"
+      # UserData:
+      #   Fn::Base64: !Sub |
+      #     <powershell>
+      #     # we can bootstrap the instance with powershell depending on the need
+      #     </powershell>
+
+  ALB:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Scheme: internet-facing
+      Subnets:
+        - !Sub "{{resolve:ssm:/AccountSettings/vpc/${VPCStackName}/PublicSubnetAZ1}}"
+        - !Sub "{{resolve:ssm:/AccountSettings/vpc/${VPCStackName}/PublicSubnetAZ2}}"
+        - !Sub "{{resolve:ssm:/AccountSettings/vpc/${VPCStackName}/PublicSubnetAZ3}}"
+      SecurityGroups:
+          - !Ref LBSecurityGroup
+          - !Sub "{{resolve:ssm:/AccountSettings/vpc/${VPCStackName}/SG-InboundWebFromOffice}}"
+      LoadBalancerAttributes:
+        - Key: access_logs.s3.enabled
+          Value: true
+        - Key: access_logs.s3.bucket
+          Value: !Sub quickbase-load-balancer-logs-${AWS::AccountId}-${AWS::Region}
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Location
+          Value: !Ref AWS::Region
+
+  ALBTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      # TODO: Longer values as healthcheck for this isn't that vital plus gives time for server to come up initially
+      HealthCheckIntervalSeconds: 300
+      HealthCheckTimeoutSeconds: 20
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 10
+      HealthCheckPath: /
+      Port: 443
+      Protocol: HTTPS
+      Targets:
+        - Id: !Ref EC2Instance
+      VpcId: !Sub "{{resolve:ssm:/AccountSettings/vpc/${VPCStackName}/VpcId}}"
+
+  ALBListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      Certificates:
+        - CertificateArn: !Ref ALBCertificate
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref ALBTargetGroup
+      LoadBalancerArn: !Ref ALB
+      Port: 443
+      Protocol: HTTPS
+      SslPolicy: ELBSecurityPolicy-TLS13-1-2-2021-06
+
+  InstanceProfile:
+      Type: "AWS::IAM::InstanceProfile"
+      Properties:
+        Path: "/"
+        Roles:
+          - !Ref InstanceRole
+  InstanceRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      ManagedPolicyArns:
+        - !Sub arn:aws:iam::${AWS::AccountId}:policy/AccountSecretsPolicyV2
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+      AssumeRolePolicyDocument:
+        Statement:
+          -
+            Effect: "Allow"
+            Principal:
+              Service:
+                - "ec2.amazonaws.com"
+            Action:
+              - "sts:AssumeRole"
+      Path: "/"
+      Policies:
+        -
+          PolicyName: describe-instances-info-policy
+          PolicyDocument:
+            Statement:
+              -
+                Effect: Allow
+                Action:
+                  - elasticloadbalancing:DescribeInstanceHealth
+                  - ec2:DescribeInstances
+                Resource:
+                  - "*"
+
+  # ALBCertificate:
+  #   Type: AWS::CertificateManager::Certificate
+  #   Properties:
+  #     DomainName: !Sub ${AWS::StackName}.${AWS::Region}.{{resolve:ssm:/AccountSettings/env/Domain}}
+  #     DomainValidationOptions:
+  #       - DomainName: !Sub ${AWS::StackName}.${AWS::Region}.{{resolve:ssm:/AccountSettings/env/Domain}}
+  #         HostedZoneId: "{{resolve:ssm:/AccountSettings/env/HostedZoneID}}"
+  #     ValidationMethod: DNS
+
+  Route53Alias:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      AliasTarget:
+        HostedZoneId: !GetAtt ALB.CanonicalHostedZoneID
+        DNSName: !GetAtt ALB.DNSName
+      HostedZoneName: !Sub "{{resolve:ssm:/AccountSettings/env/Domain}}."
+      Name: !Sub ${AWS::StackName}.${AWS::Region}.{{resolve:ssm:/AccountSettings/env/Domain}}.
+      Type: A
+
+  GetLatestAmiByName:
+    Type: Custom::GetLatestAmiByName
+    Properties:
+      ServiceToken: !Sub arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:GetLatestAmiByName
+      AmiName: !Sub qbapp.2019.master.v*
+      TriggerParam: !Sub ${AMITriggerParam}
