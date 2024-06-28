@@ -1,0 +1,186 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: Manages the Quickbase resources CloudFront and Lambda Edge.
+
+Parameters:
+  S3BucketName:
+    Description: The name of the S3 bucket
+    Type: String
+    Default: images
+  CachingOptimizedId:
+    Description: Id of caching optimized policy
+    Type: String
+    Default: 658327ea-f89d-4fab-a63d-7e88639e58f6
+
+Resources:
+  RootBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub ${S3BucketName}.{{resolve:ssm:/AccountSettings/env/Domain}}
+      CorsConfiguration:
+        CorsRules:
+          - AllowedHeaders:
+              - Authorization
+            AllowedMethods:
+              - GET
+            AllowedOrigins:
+              - '*'
+            MaxAge: 900
+      VersioningConfiguration:
+        Status: Enabled
+
+  RootBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref RootBucket
+      PolicyDocument:
+        Statement:
+          - Action:
+              - s3:GetObject
+            Sid: AllowCloudFrontServicePrincipal
+            Effect: Allow
+            Principal:
+              Service: cloudfront.amazonaws.com
+            Resource: !Sub arn:aws:s3:::${RootBucket}/*
+            Condition:
+              StringEquals:
+                AWS:SourceArn: !Sub arn:aws:cloudfront::${AWS::AccountId}:distribution/${CloudFrontDistribution}
+          - Action:
+              - s3:ListBucket
+              - s3:GetObject
+            Effect: Allow
+            Resource:
+              - !Sub arn:aws:s3:::${RootBucket}
+              - !Sub arn:aws:s3:::${RootBucket}/*
+            Principal:
+              AWS:
+                - !Ref AWS::AccountId
+          - Action:
+              - s3:*
+            Sid: DenyInsecureConnections
+            Effect: Deny
+            Resource:
+              - !GetAtt RootBucket.Arn
+              - !Sub ${RootBucket.Arn}/*
+            Principal: '*'
+            Condition:
+              Bool:
+                aws:SecureTransport: false
+
+  LogsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub ${S3BucketName}-logs.{{resolve:ssm:/AccountSettings/env/Domain}}
+      AccessControl: BucketOwnerFullControl
+      LifecycleConfiguration:
+        Rules:
+          - ExpirationInDays: 185
+            Status: Enabled
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerPreferred
+
+  LogsBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref LogsBucket
+      PolicyDocument:
+        Statement:
+          - Sid: DenyInsecureConnections
+            Action: s3:*
+            Effect: Deny
+            Resource:
+              - !GetAtt LogsBucket.Arn
+              - !Sub ${LogsBucket.Arn}/*
+            Principal: '*'
+            Condition:
+              Bool:
+                aws:SecureTransport: false
+
+  CloudFrontDistribution:
+    Type: AWS::CloudFront::Distribution
+    # DependsOn:
+    #   - LambdaFunction
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        Comment: !Sub Cloudfront for ${S3BucketName}
+        Aliases:
+          - !Sub ${S3BucketName}.{{resolve:ssm:/AccountSettings/env/Domain}}
+        Logging:
+          Bucket: !GetAtt LogsBucket.DomainName
+          IncludeCookies: false
+          Prefix: !Sub ${AWS::StackName}-cloudfront-logs/
+        PriceClass: PriceClass_100 # Low tier pricing while we figure this out. We may later decide to upgrade to PriceClass_All (https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/PriceClass.html)
+        ViewerCertificate:
+          AcmCertificateArn: '{{resolve:ssm:/AccountSettings/env/EastCertificateARN}}'
+          SslSupportMethod: sni-only
+          MinimumProtocolVersion: TLSv1.2_2021
+        Origins:
+          - DomainName: !Sub ${S3BucketName}.{{resolve:ssm:/AccountSettings/env/Domain}}.s3.${AWS::Region}.amazonaws.com
+            Id: S3Origin
+            OriginAccessControlId: !GetAtt CfOriginAccessControl.Id
+            S3OriginConfig:
+              OriginAccessIdentity: ''
+              # OriginAccessIdentity: !Sub origin-access-identity/cloudfront/${CfOriginAccessControl}
+        DefaultCacheBehavior:
+          TargetOriginId: S3Origin
+          ViewerProtocolPolicy: redirect-to-https
+          Compress: true
+          DefaultTTL: 60
+          MinTTL: 60
+          MaxTTL: 300
+          # LambdaFunctionAssociations:
+          #   - EventType: origin-request
+          #     LambdaFunctionARN: !Ref LambdaFunction.Version
+          ForwardedValues:
+            QueryString: false
+            Cookies:
+              Forward: none
+        CacheBehaviors:
+          - PathPattern: '*.jpg'
+            TargetOriginId: S3Origin
+            ViewerProtocolPolicy: redirect-to-https
+            Compress: true
+            AllowedMethods:
+              - GET
+              - HEAD
+            CachePolicyId: !Ref CachingOptimizedId
+          - PathPattern: '*.jpeg'
+            TargetOriginId: S3Origin
+            ViewerProtocolPolicy: redirect-to-https
+            Compress: true
+            AllowedMethods:
+              - GET
+              - HEAD
+            CachePolicyId: !Ref CachingOptimizedId
+          - PathPattern: '*.png'
+            TargetOriginId: S3Origin
+            ViewerProtocolPolicy: redirect-to-https
+            Compress: true
+            AllowedMethods:
+              - GET
+              - HEAD
+            CachePolicyId: !Ref CachingOptimizedId
+          - PathPattern: '*.gif'
+            TargetOriginId: S3Origin
+            ViewerProtocolPolicy: redirect-to-https
+            Compress: true
+            AllowedMethods:
+              - GET
+              - HEAD
+            CachePolicyId: !Ref CachingOptimizedId
+
+  CfOriginAccessControl:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name: !Sub ${AWS::StackName}-OAC
+        Description: Origin Access Control for ${S3Bucket}
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+Outputs:
+  CloudFrontDistributionID:
+    Description: CloudFront distribution ID
+    Value: !Ref CloudFrontDistribution
